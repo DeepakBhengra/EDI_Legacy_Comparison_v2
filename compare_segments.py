@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -50,9 +50,12 @@ class ComparisonResult:
 
 
 def read_segment_lines(path: Path) -> list[str]:
-    """Read a segment file as individual lines, preserving inner whitespace."""
+    """Read a segment file as individual lines, preserving inner whitespace.
+
+    Completely empty lines (common trailing export artifacts) are ignored.
+    """
     text = path.read_text(encoding="utf-8", errors="replace")
-    return text.splitlines()
+    return [line for line in text.splitlines() if line != ""]
 
 
 def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> ComparisonResult:
@@ -63,49 +66,80 @@ def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> C
     - Otherwise look ahead through remaining unused Legacy lines.
       If the GDL line is found later, record Match and mark the row yellow.
       If it is not found, record Missing in Impulse and mark the row red.
-    - Unused Legacy lines that never matched any GDL line are appended as
-      Missing in GDL and marked red.
+    - Unused Legacy lines that cannot match any remaining GDL line are written as
+      Missing in GDL (red), either when they are skipped or after all GDL lines.
     """
     gdl = list(gdl_lines)
     legacy = list(legacy_lines)
 
-    remaining: dict[str, deque[int]] = defaultdict(deque)
+    remaining_legacy: dict[str, deque[int]] = defaultdict(deque)
     for index, line in enumerate(legacy):
-        remaining[line].append(index)
+        remaining_legacy[line].append(index)
 
+    remaining_gdl_counts = Counter(gdl)
     used = [False] * len(legacy)
+    rows: list[ReportRow] = []
     next_unused = 0
-    assignments: list[tuple[int | None, bool]] = []
 
     def advance_next_unused() -> None:
         nonlocal next_unused
         while next_unused < len(legacy) and used[next_unused]:
             next_unused += 1
 
+    def flush_unmatchable_legacy() -> None:
+        """Emit Legacy lines that cannot pair with any remaining GDL line."""
+        nonlocal next_unused
+        advance_next_unused()
+        while next_unused < len(legacy) and remaining_gdl_counts[legacy[next_unused]] == 0:
+            rows.append(
+                ReportRow(
+                    gdl_segment="",
+                    legacy_segment=legacy[next_unused],
+                    status=STATUS_MISSING_IN_GDL,
+                    fill=FILL_RED,
+                )
+            )
+            used[next_unused] = True
+            leftover = remaining_legacy.get(legacy[next_unused])
+            if leftover and leftover[0] == next_unused:
+                leftover.popleft()
+            next_unused += 1
+            advance_next_unused()
+
+    def consume_legacy(index: int) -> None:
+        used[index] = True
+        leftover = remaining_legacy.get(legacy[index])
+        if leftover and leftover[0] == index:
+            leftover.popleft()
+        elif leftover:
+            leftover.remove(index)
+
     for gdl_line in gdl:
         advance_next_unused()
-        candidates = remaining.get(gdl_line)
         matched_index: int | None = None
         out_of_order = False
+        candidates = remaining_legacy.get(gdl_line)
 
-        if candidates:
-            earliest = candidates[0]
-            if earliest == next_unused:
-                matched_index = earliest
-            elif earliest > next_unused:
-                matched_index = earliest
-                out_of_order = True
+        if next_unused < len(legacy) and legacy[next_unused] == gdl_line:
+            matched_index = next_unused
+        elif candidates:
+            for candidate in candidates:
+                if candidate > next_unused:
+                    matched_index = candidate
+                    out_of_order = True
+                    break
 
         if matched_index is not None:
-            used[matched_index] = True
-            candidates.popleft()
-            assignments.append((matched_index, out_of_order))
+            rows.append(
+                ReportRow(
+                    gdl_segment=gdl_line,
+                    legacy_segment=legacy[matched_index],
+                    status=STATUS_MATCH,
+                    fill=FILL_YELLOW if out_of_order else None,
+                )
+            )
+            consume_legacy(matched_index)
         else:
-            assignments.append((None, False))
-
-    rows: list[ReportRow] = []
-    for gdl_line, (legacy_index, out_of_order) in zip(gdl, assignments):
-        if legacy_index is None:
             rows.append(
                 ReportRow(
                     gdl_segment=gdl_line,
@@ -114,26 +148,27 @@ def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> C
                     fill=FILL_RED,
                 )
             )
-        else:
-            rows.append(
-                ReportRow(
-                    gdl_segment=gdl_line,
-                    legacy_segment=legacy[legacy_index],
-                    status=STATUS_MATCH,
-                    fill=FILL_YELLOW if out_of_order else None,
-                )
-            )
 
-    for index, line in enumerate(legacy):
-        if not used[index]:
+        remaining_gdl_counts[gdl_line] -= 1
+        if remaining_gdl_counts[gdl_line] <= 0:
+            del remaining_gdl_counts[gdl_line]
+
+        flush_unmatchable_legacy()
+
+    flush_unmatchable_legacy()
+    while next_unused < len(legacy):
+        if not used[next_unused]:
             rows.append(
                 ReportRow(
                     gdl_segment="",
-                    legacy_segment=line,
+                    legacy_segment=legacy[next_unused],
                     status=STATUS_MISSING_IN_GDL,
                     fill=FILL_RED,
                 )
             )
+            used[next_unused] = True
+        next_unused += 1
+        advance_next_unused()
 
     return ComparisonResult(rows=rows, gdl_line_count=len(gdl), legacy_line_count=len(legacy))
 
@@ -188,7 +223,8 @@ def write_excel_report(result: ComparisonResult, output_path: Path) -> None:
     detail.set_column(0, 1, 85)
     detail.set_column(2, 2, 24)
     detail.set_row(0, 22)
-    detail.autofilter(0, 0, max(len(result.rows), 1), 2)
+    last_data_row = max(len(result.rows), 1)
+    detail.autofilter(0, 0, last_data_row, 2)
 
     for row_number, row in enumerate(result.rows, start=1):
         if row.fill == FILL_YELLOW:
