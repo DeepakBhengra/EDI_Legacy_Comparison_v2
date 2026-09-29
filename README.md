@@ -10,12 +10,13 @@ Each GDL line is compared against the current unused Legacy line, then against l
 
 | Situation | GDL Segment | Legacy Segment | status | Row color |
 | --- | --- | --- | --- | --- |
+| First line of each file | first GDL line | first Legacy line | `Mismatch` | orange |
 | Current GDL line equals the current Legacy line | GDL line | Legacy line | `Match` | none |
 | Current GDL line does not equal the current Legacy line, but the same GDL line exists later in Legacy | GDL line | that later Legacy line | `Match` | yellow |
 | Current GDL line is not present in any remaining Legacy line | GDL line | blank | `Missing in Impulse` | red |
 | A Legacy line cannot match any remaining GDL line | blank | Legacy line | `Missing in GDL` | red |
 
-Duplicate lines (for example many `QTY~33~0~EA` rows) are matched one-to-one. A line is never reused after it has been paired. Unique header mismatches (dates, control numbers) are reported as missing on both sides so later in-order product lines can still sequential-match.
+The first GDL line and first Legacy line are always paired on one row as `Mismatch` (typically the `ISA` envelope). They are not compared against later lines. Duplicate lines (for example many `QTY~33~0~EA` rows) are matched one-to-one. A line is never reused after it has been paired. Unique header mismatches after the first line (dates, control numbers) are reported as missing on both sides so later in-order product lines can still sequential-match.
 
 ## Setup
 

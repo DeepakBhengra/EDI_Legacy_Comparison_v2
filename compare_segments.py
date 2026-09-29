@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import Iterable
 
 STATUS_MATCH = "Match"
+STATUS_MISMATCH = "Mismatch"
 STATUS_MISSING_IN_IMPULSE = "Missing in Impulse"
 STATUS_MISSING_IN_GDL = "Missing in GDL"
 
 FILL_YELLOW = "yellow"
+FILL_ORANGE = "orange"
 FILL_RED = "red"
 
 
@@ -41,6 +43,10 @@ class ComparisonResult:
         return sum(1 for row in self.rows if row.status == STATUS_MATCH and row.fill == FILL_YELLOW)
 
     @property
+    def mismatches(self) -> int:
+        return sum(1 for row in self.rows if row.status == STATUS_MISMATCH)
+
+    @property
     def missing_in_impulse(self) -> int:
         return sum(1 for row in self.rows if row.status == STATUS_MISSING_IN_IMPULSE)
 
@@ -62,6 +68,8 @@ def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> C
     """Walk GDL lines against Legacy lines and build report rows.
 
     Matching rules:
+    - The first GDL line and first Legacy line are written on one row as Mismatch
+      and are not used in later matching.
     - If the current unused Legacy line equals the current GDL line, record Match.
     - Otherwise look ahead through remaining unused Legacy lines.
       If the GDL line is found later, record Match and mark the row yellow.
@@ -69,8 +77,22 @@ def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> C
     - Unused Legacy lines that cannot match any remaining GDL line are written as
       Missing in GDL (red), either when they are skipped or after all GDL lines.
     """
-    gdl = list(gdl_lines)
-    legacy = list(legacy_lines)
+    all_gdl = list(gdl_lines)
+    all_legacy = list(legacy_lines)
+    rows: list[ReportRow] = []
+
+    if all_gdl or all_legacy:
+        rows.append(
+            ReportRow(
+                gdl_segment=all_gdl[0] if all_gdl else "",
+                legacy_segment=all_legacy[0] if all_legacy else "",
+                status=STATUS_MISMATCH,
+                fill=FILL_ORANGE,
+            )
+        )
+
+    gdl = all_gdl[1:]
+    legacy = all_legacy[1:]
 
     remaining_legacy: dict[str, deque[int]] = defaultdict(deque)
     for index, line in enumerate(legacy):
@@ -78,7 +100,6 @@ def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> C
 
     remaining_gdl_counts = Counter(gdl)
     used = [False] * len(legacy)
-    rows: list[ReportRow] = []
     next_unused = 0
 
     def advance_next_unused() -> None:
@@ -170,7 +191,11 @@ def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> C
         next_unused += 1
         advance_next_unused()
 
-    return ComparisonResult(rows=rows, gdl_line_count=len(gdl), legacy_line_count=len(legacy))
+    return ComparisonResult(
+        rows=rows,
+        gdl_line_count=len(all_gdl),
+        legacy_line_count=len(all_legacy),
+    )
 
 
 def write_excel_report(result: ComparisonResult, output_path: Path) -> None:
@@ -199,6 +224,9 @@ def write_excel_report(result: ComparisonResult, output_path: Path) -> None:
     yellow_fmt = workbook.add_format(
         {"border": 1, "valign": "top", "text_wrap": True, "bg_color": "#FFFF00"}
     )
+    orange_fmt = workbook.add_format(
+        {"border": 1, "valign": "top", "text_wrap": True, "bg_color": "#FFC000"}
+    )
     red_fmt = workbook.add_format(
         {
             "border": 1,
@@ -211,6 +239,7 @@ def write_excel_report(result: ComparisonResult, output_path: Path) -> None:
     label_fmt = workbook.add_format({"bold": True, "border": 1, "bg_color": "#D9E2F3"})
     value_fmt = workbook.add_format({"border": 1})
     yellow_value_fmt = workbook.add_format({"border": 1, "bg_color": "#FFFF00"})
+    orange_value_fmt = workbook.add_format({"border": 1, "bg_color": "#FFC000"})
     red_value_fmt = workbook.add_format(
         {"border": 1, "bg_color": "#FF0000", "font_color": "#FFFFFF"}
     )
@@ -229,6 +258,8 @@ def write_excel_report(result: ComparisonResult, output_path: Path) -> None:
     for row_number, row in enumerate(result.rows, start=1):
         if row.fill == FILL_YELLOW:
             cell_fmt = yellow_fmt
+        elif row.fill == FILL_ORANGE:
+            cell_fmt = orange_fmt
         elif row.fill == FILL_RED:
             cell_fmt = red_fmt
         else:
@@ -245,6 +276,7 @@ def write_excel_report(result: ComparisonResult, output_path: Path) -> None:
         ("Legacy lines", result.legacy_line_count, value_fmt),
         ("Sequential Match", result.sequential_matches, value_fmt),
         ("Out-of-order Match (yellow)", result.out_of_order_matches, yellow_value_fmt),
+        ("Mismatch (first lines)", result.mismatches, orange_value_fmt),
         ("Missing in Impulse", result.missing_in_impulse, red_value_fmt),
         ("Missing in GDL", result.missing_in_gdl, red_value_fmt),
         ("Total report rows", len(result.rows), value_fmt),
@@ -307,6 +339,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Comparison complete")
     print(f"  Sequential Match:          {result.sequential_matches:,}")
     print(f"  Out-of-order Match:        {result.out_of_order_matches:,}")
+    print(f"  Mismatch (first lines):    {result.mismatches:,}")
     print(f"  Missing in Impulse:        {result.missing_in_impulse:,}")
     print(f"  Missing in GDL:            {result.missing_in_gdl:,}")
     print(f"  Report rows:               {len(result.rows):,}")
