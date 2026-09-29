@@ -28,13 +28,13 @@ pip install -r requirements.txt
 
 ## Run
 
-Compare the bundled sample files and write `reports/segment_comparison.xlsx`:
+Compare the bundled sample files. Each run writes a new workbook under `reports/` with a timestamp in the filename, for example `reports/segment_comparison_20260929_130445.xlsx`:
 
 ```bash
 python compare_segments.py
 ```
 
-Or pass explicit paths:
+Or pass explicit paths. The timestamp is still added to whatever output name you give:
 
 ```bash
 python compare_segments.py \

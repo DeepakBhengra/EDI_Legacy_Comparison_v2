@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from compare_segments import (
     STATUS_MISSING_IN_IMPULSE,
     compare_segments,
     read_segment_lines,
+    timestamped_output_path,
     write_excel_report,
 )
 
@@ -29,6 +31,22 @@ HEADER_MISMATCH_ROWS = [
 
 def rows_as_tuples(result) -> list[tuple[str, str, str, str | None]]:
     return [(row.gdl_segment, row.legacy_segment, row.status, row.fill) for row in result.rows]
+
+
+def test_timestamped_output_path_inserts_local_timestamp() -> None:
+    when = datetime(2026, 9, 29, 13, 4, 45)
+    path = timestamped_output_path(Path("reports/segment_comparison.xlsx"), when=when)
+    assert path == Path("reports/segment_comparison_20260929_130445.xlsx")
+
+
+def test_timestamped_output_path_adds_microseconds_when_file_exists(tmp_path: Path) -> None:
+    when = datetime(2026, 9, 29, 13, 4, 45)
+    existing = tmp_path / "segment_comparison_20260929_130445.xlsx"
+    existing.write_bytes(b"")
+    path = timestamped_output_path(tmp_path / "segment_comparison.xlsx", when=when)
+    assert path.name.startswith("segment_comparison_20260929_130445_")
+    assert path.suffix == ".xlsx"
+    assert path != existing
 
 
 def test_first_four_lines_are_always_written_as_mismatch() -> None:
@@ -197,3 +215,19 @@ def test_excel_report_headers_status_and_fill_colors(tmp_path: Path) -> None:
     assert metrics["Mismatch (first 4 lines)"] == 4
     assert metrics["Missing in Impulse"] == 1
     assert metrics["Missing in GDL"] == 1
+
+
+def test_main_writes_a_timestamped_excel_file(tmp_path: Path) -> None:
+    from compare_segments import main
+
+    gdl = tmp_path / "gdl.txt"
+    legacy = tmp_path / "legacy.txt"
+    gdl.write_text("\n".join([*HEADERS_GDL, "LIN~A"]) + "\n", encoding="utf-8")
+    legacy.write_text("\n".join([*HEADERS_LEG, "LIN~A"]) + "\n", encoding="utf-8")
+    output = tmp_path / "report.xlsx"
+
+    assert main(["--gdl", str(gdl), "--legacy", str(legacy), "-o", str(output)]) == 0
+    reports = list(tmp_path.glob("report_*.xlsx"))
+    assert len(reports) == 1
+    assert reports[0].name.startswith("report_")
+    assert not output.exists()

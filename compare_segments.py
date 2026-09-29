@@ -7,6 +7,7 @@ import argparse
 import sys
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -65,6 +66,17 @@ def read_segment_lines(path: Path) -> list[str]:
     """
     text = path.read_text(encoding="utf-8", errors="replace")
     return [line for line in text.splitlines() if line != ""]
+
+
+def timestamped_output_path(path: Path, when: datetime | None = None) -> Path:
+    """Insert a local timestamp before the file suffix so each run writes a new file."""
+    stamp = (when or datetime.now()).strftime("%Y%m%d_%H%M%S")
+    suffix = path.suffix or ".xlsx"
+    candidate = path.with_name(f"{path.stem}_{stamp}{suffix}")
+    if candidate.exists():
+        stamp = (when or datetime.now()).strftime("%Y%m%d_%H%M%S_%f")
+        candidate = path.with_name(f"{path.stem}_{stamp}{suffix}")
+    return candidate
 
 
 def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> ComparisonResult:
@@ -316,7 +328,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "-o",
         type=Path,
         default=repo_root / "reports" / "segment_comparison.xlsx",
-        help="Path to the Excel report to create.",
+        help="Base path for the Excel report. A timestamp is added to the filename on each run.",
     )
     return parser.parse_args(argv)
 
@@ -337,7 +349,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Comparing {len(gdl_lines):,} GDL lines with {len(legacy_lines):,} Legacy lines...")
     result = compare_segments(gdl_lines, legacy_lines)
-    write_excel_report(result, args.output)
+    output_path = timestamped_output_path(args.output)
+    write_excel_report(result, output_path)
 
     print()
     print("Comparison complete")
@@ -347,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Missing in Impulse:        {result.missing_in_impulse:,}")
     print(f"  Missing in GDL:            {result.missing_in_gdl:,}")
     print(f"  Report rows:               {len(result.rows):,}")
-    print(f"  Excel report:              {args.output}")
+    print(f"  Excel report:              {output_path}")
     return 0
 
 
