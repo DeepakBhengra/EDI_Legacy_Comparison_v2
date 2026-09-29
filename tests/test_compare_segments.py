@@ -17,53 +17,82 @@ from compare_segments import (
     write_excel_report,
 )
 
+HEADERS_GDL = ["ISA-GDL", "GS-GDL", "ST-GDL", "BIA-GDL"]
+HEADERS_LEG = ["ISA-LEG", "GS-LEG", "ST-LEG", "BIA-LEG"]
+HEADER_MISMATCH_ROWS = [
+    ("ISA-GDL", "ISA-LEG", STATUS_MISMATCH, FILL_ORANGE),
+    ("GS-GDL", "GS-LEG", STATUS_MISMATCH, FILL_ORANGE),
+    ("ST-GDL", "ST-LEG", STATUS_MISMATCH, FILL_ORANGE),
+    ("BIA-GDL", "BIA-LEG", STATUS_MISMATCH, FILL_ORANGE),
+]
+
 
 def rows_as_tuples(result) -> list[tuple[str, str, str, str | None]]:
     return [(row.gdl_segment, row.legacy_segment, row.status, row.fill) for row in result.rows]
 
 
-def test_first_lines_are_always_written_as_mismatch() -> None:
-    result = compare_segments(["ISA-GDL", "ST~846~0001", "LIN~A"], ["ISA-LEG", "ST~846~0001", "LIN~A"])
+def test_first_four_lines_are_always_written_as_mismatch() -> None:
+    result = compare_segments(
+        [*HEADERS_GDL, "N1~WH", "LIN~A"],
+        [*HEADERS_LEG, "N1~WH", "LIN~A"],
+    )
 
     assert rows_as_tuples(result) == [
-        ("ISA-GDL", "ISA-LEG", STATUS_MISMATCH, FILL_ORANGE),
-        ("ST~846~0001", "ST~846~0001", STATUS_MATCH, None),
+        *HEADER_MISMATCH_ROWS,
+        ("N1~WH", "N1~WH", STATUS_MATCH, None),
         ("LIN~A", "LIN~A", STATUS_MATCH, None),
     ]
-    assert result.mismatches == 1
+    assert result.mismatches == 4
     assert result.sequential_matches == 2
 
 
-def test_first_lines_are_excluded_from_later_matching() -> None:
-    result = compare_segments(["FOO", "BAR"], ["BAZ", "FOO"])
+def test_first_four_lines_are_excluded_from_later_matching() -> None:
+    result = compare_segments(
+        ["FOO", "H2", "H3", "H4", "BAR"],
+        ["BAZ", "H2", "H3", "H4", "FOO"],
+    )
 
     assert rows_as_tuples(result) == [
         ("FOO", "BAZ", STATUS_MISMATCH, FILL_ORANGE),
+        ("H2", "H2", STATUS_MISMATCH, FILL_ORANGE),
+        ("H3", "H3", STATUS_MISMATCH, FILL_ORANGE),
+        ("H4", "H4", STATUS_MISMATCH, FILL_ORANGE),
         ("BAR", "", STATUS_MISSING_IN_IMPULSE, FILL_RED),
         ("", "FOO", STATUS_MISSING_IN_GDL, FILL_RED),
     ]
 
 
-def test_sequential_matches_have_no_fill_after_first_line() -> None:
-    result = compare_segments(["A", "B", "C"], ["A", "B", "C"])
+def test_files_shorter_than_four_lines_pair_all_as_mismatch() -> None:
+    result = compare_segments(["A", "B"], ["C", "D"])
 
     assert rows_as_tuples(result) == [
-        ("A", "A", STATUS_MISMATCH, FILL_ORANGE),
+        ("A", "C", STATUS_MISMATCH, FILL_ORANGE),
+        ("B", "D", STATUS_MISMATCH, FILL_ORANGE),
+    ]
+    assert result.mismatches == 2
+    assert result.sequential_matches == 0
+
+
+def test_sequential_matches_have_no_fill_after_header_lines() -> None:
+    result = compare_segments([*HEADERS_GDL, "B", "C"], [*HEADERS_LEG, "B", "C"])
+
+    assert rows_as_tuples(result) == [
+        *HEADER_MISMATCH_ROWS,
         ("B", "B", STATUS_MATCH, None),
         ("C", "C", STATUS_MATCH, None),
     ]
     assert result.sequential_matches == 2
     assert result.out_of_order_matches == 0
-    assert result.mismatches == 1
+    assert result.mismatches == 4
     assert result.missing_in_impulse == 0
     assert result.missing_in_gdl == 0
 
 
 def test_out_of_order_match_is_yellow() -> None:
-    result = compare_segments(["H", "A", "C", "B"], ["H", "A", "B", "C"])
+    result = compare_segments([*HEADERS_GDL, "A", "C", "B"], [*HEADERS_LEG, "A", "B", "C"])
 
     assert rows_as_tuples(result) == [
-        ("H", "H", STATUS_MISMATCH, FILL_ORANGE),
+        *HEADER_MISMATCH_ROWS,
         ("A", "A", STATUS_MATCH, None),
         ("C", "C", STATUS_MATCH, FILL_YELLOW),
         ("B", "B", STATUS_MATCH, None),
@@ -71,10 +100,10 @@ def test_out_of_order_match_is_yellow() -> None:
 
 
 def test_gdl_line_missing_in_impulse_is_red() -> None:
-    result = compare_segments(["H", "A", "X", "C"], ["H", "A", "C"])
+    result = compare_segments([*HEADERS_GDL, "A", "X", "C"], [*HEADERS_LEG, "A", "C"])
 
     assert rows_as_tuples(result) == [
-        ("H", "H", STATUS_MISMATCH, FILL_ORANGE),
+        *HEADER_MISMATCH_ROWS,
         ("A", "A", STATUS_MATCH, None),
         ("X", "", STATUS_MISSING_IN_IMPULSE, FILL_RED),
         ("C", "C", STATUS_MATCH, None),
@@ -82,10 +111,10 @@ def test_gdl_line_missing_in_impulse_is_red() -> None:
 
 
 def test_legacy_extra_line_is_missing_in_gdl_then_later_line_still_matches() -> None:
-    result = compare_segments(["H", "A", "C"], ["H", "A", "B", "C"])
+    result = compare_segments([*HEADERS_GDL, "A", "C"], [*HEADERS_LEG, "A", "B", "C"])
 
     assert rows_as_tuples(result) == [
-        ("H", "H", STATUS_MISMATCH, FILL_ORANGE),
+        *HEADER_MISMATCH_ROWS,
         ("A", "A", STATUS_MATCH, None),
         ("", "B", STATUS_MISSING_IN_GDL, FILL_RED),
         ("C", "C", STATUS_MATCH, None),
@@ -94,12 +123,12 @@ def test_legacy_extra_line_is_missing_in_gdl_then_later_line_still_matches() -> 
 
 def test_duplicate_lines_are_consumed_one_to_one() -> None:
     result = compare_segments(
-        ["HDR", "QTY~33~0~EA", "LIN~~MG~AAA", "QTY~33~0~EA"],
-        ["HDR", "QTY~33~0~EA", "LIN~~MG~BBB", "QTY~33~0~EA"],
+        [*HEADERS_GDL, "QTY~33~0~EA", "LIN~~MG~AAA", "QTY~33~0~EA"],
+        [*HEADERS_LEG, "QTY~33~0~EA", "LIN~~MG~BBB", "QTY~33~0~EA"],
     )
 
     assert rows_as_tuples(result) == [
-        ("HDR", "HDR", STATUS_MISMATCH, FILL_ORANGE),
+        *HEADER_MISMATCH_ROWS,
         ("QTY~33~0~EA", "QTY~33~0~EA", STATUS_MATCH, None),
         ("", "LIN~~MG~BBB", STATUS_MISSING_IN_GDL, FILL_RED),
         ("LIN~~MG~AAA", "", STATUS_MISSING_IN_IMPULSE, FILL_RED),
@@ -131,7 +160,10 @@ def test_read_segment_lines_skips_empty_lines(tmp_path: Path) -> None:
 def test_excel_report_headers_status_and_fill_colors(tmp_path: Path) -> None:
     openpyxl = pytest.importorskip("openpyxl")
 
-    result = compare_segments(["H", "A", "C", "X"], ["H", "A", "B", "C"])
+    result = compare_segments(
+        [*HEADERS_GDL, "A", "C", "X"],
+        [*HEADERS_LEG, "A", "B", "C"],
+    )
     output = tmp_path / "report.xlsx"
     write_excel_report(result, output)
 
@@ -139,9 +171,12 @@ def test_excel_report_headers_status_and_fill_colors(tmp_path: Path) -> None:
     sheet = workbook["Comparison"]
     assert [cell.value for cell in sheet[1]] == ["GDL Segment", "Legacy Segment", "status"]
 
-    rows = [[sheet.cell(row=i, column=j).value for j in range(1, 4)] for i in range(2, 7)]
+    rows = [[sheet.cell(row=i, column=j).value for j in range(1, 4)] for i in range(2, 10)]
     assert rows == [
-        ["H", "H", STATUS_MISMATCH],
+        ["ISA-GDL", "ISA-LEG", STATUS_MISMATCH],
+        ["GS-GDL", "GS-LEG", STATUS_MISMATCH],
+        ["ST-GDL", "ST-LEG", STATUS_MISMATCH],
+        ["BIA-GDL", "BIA-LEG", STATUS_MISMATCH],
         ["A", "A", STATUS_MATCH],
         [None, "B", STATUS_MISSING_IN_GDL],
         ["C", "C", STATUS_MATCH],
@@ -149,8 +184,8 @@ def test_excel_report_headers_status_and_fill_colors(tmp_path: Path) -> None:
     ]
 
     orange_mismatch = sheet.cell(row=2, column=3).fill.fgColor.rgb
-    red_missing_legacy = sheet.cell(row=4, column=2).fill.fgColor.rgb
-    red_missing_gdl = sheet.cell(row=6, column=3).fill.fgColor.rgb
+    red_missing_legacy = sheet.cell(row=7, column=2).fill.fgColor.rgb
+    red_missing_gdl = sheet.cell(row=9, column=3).fill.fgColor.rgb
     assert orange_mismatch.endswith("FFC000")
     assert red_missing_legacy.endswith("FF0000")
     assert red_missing_gdl.endswith("FF0000")
@@ -159,6 +194,6 @@ def test_excel_report_headers_status_and_fill_colors(tmp_path: Path) -> None:
     metrics = {summary.cell(row=i, column=1).value: summary.cell(row=i, column=2).value for i in range(2, 10)}
     assert metrics["Sequential Match"] == 2
     assert metrics["Out-of-order Match (yellow)"] == 0
-    assert metrics["Mismatch (first lines)"] == 1
+    assert metrics["Mismatch (first 4 lines)"] == 4
     assert metrics["Missing in Impulse"] == 1
     assert metrics["Missing in GDL"] == 1

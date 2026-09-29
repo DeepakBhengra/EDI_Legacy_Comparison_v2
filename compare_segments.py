@@ -19,6 +19,9 @@ FILL_YELLOW = "yellow"
 FILL_ORANGE = "orange"
 FILL_RED = "red"
 
+# Envelope lines (ISA, GS, ST, BIA) are paired as Mismatch and skipped by matching.
+HEADER_MISMATCH_COUNT = 4
+
 
 @dataclass(frozen=True)
 class ReportRow:
@@ -68,8 +71,8 @@ def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> C
     """Walk GDL lines against Legacy lines and build report rows.
 
     Matching rules:
-    - The first GDL line and first Legacy line are written on one row as Mismatch
-      and are not used in later matching.
+    - The first four GDL lines and first four Legacy lines are written on matching
+      rows as Mismatch and are not used in later matching.
     - If the current unused Legacy line equals the current GDL line, record Match.
     - Otherwise look ahead through remaining unused Legacy lines.
       If the GDL line is found later, record Match and mark the row yellow.
@@ -81,18 +84,19 @@ def compare_segments(gdl_lines: Iterable[str], legacy_lines: Iterable[str]) -> C
     all_legacy = list(legacy_lines)
     rows: list[ReportRow] = []
 
-    if all_gdl or all_legacy:
+    header_count = min(HEADER_MISMATCH_COUNT, max(len(all_gdl), len(all_legacy)))
+    for index in range(header_count):
         rows.append(
             ReportRow(
-                gdl_segment=all_gdl[0] if all_gdl else "",
-                legacy_segment=all_legacy[0] if all_legacy else "",
+                gdl_segment=all_gdl[index] if index < len(all_gdl) else "",
+                legacy_segment=all_legacy[index] if index < len(all_legacy) else "",
                 status=STATUS_MISMATCH,
                 fill=FILL_ORANGE,
             )
         )
 
-    gdl = all_gdl[1:]
-    legacy = all_legacy[1:]
+    gdl = all_gdl[header_count:]
+    legacy = all_legacy[header_count:]
 
     remaining_legacy: dict[str, deque[int]] = defaultdict(deque)
     for index, line in enumerate(legacy):
@@ -276,7 +280,7 @@ def write_excel_report(result: ComparisonResult, output_path: Path) -> None:
         ("Legacy lines", result.legacy_line_count, value_fmt),
         ("Sequential Match", result.sequential_matches, value_fmt),
         ("Out-of-order Match (yellow)", result.out_of_order_matches, yellow_value_fmt),
-        ("Mismatch (first lines)", result.mismatches, orange_value_fmt),
+        ("Mismatch (first 4 lines)", result.mismatches, orange_value_fmt),
         ("Missing in Impulse", result.missing_in_impulse, red_value_fmt),
         ("Missing in GDL", result.missing_in_gdl, red_value_fmt),
         ("Total report rows", len(result.rows), value_fmt),
@@ -339,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Comparison complete")
     print(f"  Sequential Match:          {result.sequential_matches:,}")
     print(f"  Out-of-order Match:        {result.out_of_order_matches:,}")
-    print(f"  Mismatch (first lines):    {result.mismatches:,}")
+    print(f"  Mismatch (first 4 lines):  {result.mismatches:,}")
     print(f"  Missing in Impulse:        {result.missing_in_impulse:,}")
     print(f"  Missing in GDL:            {result.missing_in_gdl:,}")
     print(f"  Report rows:               {len(result.rows):,}")
