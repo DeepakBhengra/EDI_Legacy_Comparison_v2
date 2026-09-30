@@ -32,45 +32,100 @@ Each file has this shape:
 
 `LIN` matching stays inside one `ST`–`SE` block. A later `LIN` in the same block still counts as `MATCH`.
 
-## Setup
+## How to run
+
+### 1. Prerequisites
+
+- Python 3.10 or later
+- VS Code (optional, but recommended)
+- This project folder opened as the workspace root (the folder that contains `compare_segments.py`)
+
+Check Python:
+
+```bash
+python --version
+```
+
+On some Windows setups use `py -3 --version` instead.
+
+### 2. Create and activate a virtual environment
+
+macOS / Linux:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
 ```
 
-## Run
+Windows PowerShell:
 
-Each run writes a new workbook under `reports/` with a timestamp, for example `reports/segment_comparison_20260930_052800.xlsx`:
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+If PowerShell blocks activation, run this once, then activate again:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+In VS Code, press `Ctrl+Shift+P` → **Python: Select Interpreter** → choose `.venv`.
+
+### 3. Install packages
+
+Install into the same Python that will run the script:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Confirm the Excel library is visible:
+
+```bash
+python -c "import xlsxwriter; print('ok', xlsxwriter.__version__)"
+```
+
+If that fails, VS Code is using a different Python. Select the `.venv` interpreter and run `python -m pip install -r requirements.txt` again.
+
+### 4. Run the comparison
+
+From the project root:
 
 ```bash
 python compare_segments.py
 ```
 
-Or pass explicit paths. The timestamp is still added to the output name:
+That reads:
+
+- `data/GDL_Segment.txt`
+- `data/Legacy_Segment.txt`
+
+and writes a **new** Excel file under `reports/` with a timestamp in the name, for example:
+
+`reports/segment_comparison_20260930_091300.xlsx`
+
+The terminal prints the exact output path when it finishes.
+
+### 5. Use your own files
 
 ```bash
-python compare_segments.py \
-  --gdl data/GDL_Segment.txt \
-  --legacy data/Legacy_Segment.txt \
-  --output reports/segment_comparison.xlsx
+python compare_segments.py --gdl path/to/gdl.txt --legacy path/to/legacy.txt -o reports/segment_comparison.xlsx
 ```
 
-The workbook has two sheets:
+A timestamp is still added, so `-o reports/segment_comparison.xlsx` becomes something like `reports/segment_comparison_20260930_091300.xlsx`.
+
+### 6. Open the report
+
+Open the newest `.xlsx` file in `reports/`. It has two sheets:
 
 - **Comparison** — `GDL Segment`, `Legacy Segment`, `status`
 - **Summary** — MATCH / MISMATCH / missing counts and ST–SE block counts
 
-Install packages into the same Python that VS Code uses:
+Do not reuse an older workbook from a previous run.
+
+### Optional tests
 
 ```bash
-python -m pip install -r requirements.txt
-python compare_segments.py
-```
-
-## Tests
-
-```bash
-pytest -q
+python -m pytest -q
 ```
