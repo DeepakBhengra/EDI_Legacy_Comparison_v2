@@ -1,22 +1,36 @@
 # GDL vs Legacy Segment Comparison
 
-Python tool that ingests a GDL segment file and a Legacy (Impulse) segment file, compares them line by line, and writes an Excel report.
+Python tool that compares a GDL EDI 846 dump with a Legacy (Impulse) 846 dump and writes an Excel report.
 
-The bundled sample files are EDI 846 inventory segments. The same script works for any two line-oriented segment dumps.
+## File structure
+
+Each file has this shape:
+
+1. `ISA` — interchange header (once)
+2. `GS` — functional group header (once)
+3. One or more `ST`–`SE` transaction blocks:
+   - `ST` → `BIA` → optional `DTM` → `N1` / `N2` / `N3` / `N4` → `PER`
+   - repeating `LIN` + `QTY` pairs
+   - `CTT` → `SE`
+4. `GE` and `IEA` trailers (once each)
+
+`LIN`/`QTY` order inside a block may differ between GDL and Legacy.
 
 ## Matching rules
 
-Each GDL line is compared against the current unused Legacy line, then against later unused Legacy lines if needed.
-
 | Situation | GDL Segment | Legacy Segment | status | Row color |
 | --- | --- | --- | --- | --- |
-| First 4 lines of each file | GDL line | Legacy line | `Mismatch` | orange |
-| Current GDL line equals the current Legacy line | GDL line | Legacy line | `Match` | none |
-| Current GDL line does not equal the current Legacy line, but the same GDL line exists later in Legacy | GDL line | that later Legacy line | `Match` | yellow |
-| Current GDL line is not present in any remaining Legacy line | GDL line | blank | `Missing in Impulse` | red |
-| A Legacy line cannot match any remaining GDL line | blank | Legacy line | `Missing in GDL` | red |
+| `ISA` or `GS` contents are equal | line | line | `MATCH` | none |
+| `ISA` or `GS` contents differ | line | line | `MISMATCH` | orange |
+| `ST`–`SE` header (`ST`, `BIA`, `N1`, `N2`, `N3`, `N4`, `PER`, `CTT`, `SE`) equal | line | line | `MATCH` | none |
+| Those header lines differ | line | line | `MISMATCH` | orange |
+| GDL `LIN` exists in the same warehouse block before `CTT` | GDL `LIN`/`QTY` | matching Legacy `LIN`/`QTY` | `MATCH` | none |
+| GDL `LIN` is not in that Legacy block | GDL `LIN`/`QTY` | blank | `Missing in Impulse` | red |
+| Legacy `LIN`/`QTY` has no GDL pair in that block | blank | Legacy `LIN`/`QTY` | `Missing in GDL` | red |
 
-The first four GDL lines and first four Legacy lines are always paired on matching rows as `Mismatch` (typically `ISA`, `GS`, `ST`, `BIA`). They are not compared against later lines. Duplicate lines (for example many `QTY~33~0~EA` rows) are matched one-to-one. A line is never reused after it has been paired. Unique header mismatches after those first four lines (dates, control numbers) are reported as missing on both sides so later in-order product lines can still sequential-match.
+`ST`–`SE` blocks are paired by the `N1` warehouse line, not by `ST` control number. That keeps the same warehouse together when GDL inserts extra blocks without `N1`. Unpaired GDL blocks are `Missing in Impulse`. Unpaired Legacy blocks are `Missing in GDL`.
+
+`LIN` matching stays inside one `ST`–`SE` block. A later `LIN` in the same block still counts as `MATCH`.
 
 ## Setup
 
@@ -28,13 +42,13 @@ pip install -r requirements.txt
 
 ## Run
 
-Compare the bundled sample files. Each run writes a new workbook under `reports/` with a timestamp in the filename, for example `reports/segment_comparison_20260929_130445.xlsx`:
+Each run writes a new workbook under `reports/` with a timestamp, for example `reports/segment_comparison_20260930_052800.xlsx`:
 
 ```bash
 python compare_segments.py
 ```
 
-Or pass explicit paths. The timestamp is still added to whatever output name you give:
+Or pass explicit paths. The timestamp is still added to the output name:
 
 ```bash
 python compare_segments.py \
@@ -45,10 +59,15 @@ python compare_segments.py \
 
 The workbook has two sheets:
 
-- **Comparison** — one row per GDL line, then leftover unmatched Legacy lines. Columns are `GDL Segment`, `Legacy Segment`, and `status`.
-- **Summary** — counts of sequential matches, out-of-order (yellow) matches, and missing rows.
+- **Comparison** — `GDL Segment`, `Legacy Segment`, `status`
+- **Summary** — MATCH / MISMATCH / missing counts and ST–SE block counts
 
-The report is `.xlsx` rather than legacy `.xls` so it can hold the full file size (these samples are ~55k lines each). Completely empty lines are ignored so trailing blank rows from file exports do not appear as mismatches.
+Install packages into the same Python that VS Code uses:
+
+```bash
+python -m pip install -r requirements.txt
+python compare_segments.py
+```
 
 ## Tests
 
